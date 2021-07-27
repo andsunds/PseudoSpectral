@@ -19,7 +19,7 @@ import warnings
 class PseudoSpectral:
 
     def __init__(self, fname=None,
-                 xx=None, L=None, N=None,
+                 xx=None, L=None, N=None, v_wake=None,
                  pulse=None, wp_sq=None, E_init=None,
                  wp_sq_init=None, filter_1=None, filter_2=None,
                  killReflections=False):
@@ -27,15 +27,16 @@ class PseudoSpectral:
         if fname is not None: 
             self.__file_init__(fname)
         else:
-            self.__basic_init__(xx, L, N, pulse, wp_sq, E_init,
-                                wp_sq_init, filter_1, filter_2,
-                                killReflections)
+            self.__basic_init__(xx=xx, L=L, N=N, pulse=pulse,
+                                v_wake=v_wake, wp_sq=wp_sq, E_init=E_init,
+                                wp_sq_init=wp_sq_init, filter_1=filter_1, filter_2=filter_2,
+                                killReflections=killReflections)
     ## end __init__
             
-    def __basic_init__(self, xx=None, L=None, N=None,
-                 pulse=None, wp_sq=None, E_init=None,
-                 wp_sq_init=None, filter_1=None, filter_2=None,
-                 killReflections=False):
+    def __basic_init__(self, xx=None, L=None, N=None, pulse=None,
+                       v_wake=None, wp_sq=None, E_init=None,
+                       wp_sq_init=None, filter_1=None, filter_2=None,
+                       killReflections=False):
 
         ## Initialization of the output variable
         self.OUT = None
@@ -67,10 +68,17 @@ class PseudoSpectral:
         
         self.timeVaryingMedia = False
         self.homogeneousMedia = False
+        self.movingMedia = False
+
 
         self.wp_sq        = None # Array
         self.wp_sq_time   = None # Function
         self.wp_sq_scalar = None # Scalar
+
+        def advect(vec,j):
+            n=vec.size
+            i=np.arange(n)
+            return vec[(i-j)%n]
         
         if callable(wp_sq):
             try:
@@ -80,7 +88,12 @@ class PseudoSpectral:
                 self.wp_sq = self.wp_sq_time(0)
             except TypeError:
                 self.wp_sq = wp_sq(self.x)
-                self.wp_sq_time = lambda t: self.wp_sq
+                if v_wake is not None:
+                    self.v_wake=v_wake
+                    self.movingMedia = True
+                    self.wp_sq_time=lambda t: advect(self.wp_sq,int(self.v_wake*t))
+                else:
+                    self.wp_sq_time = lambda t: self.wp_sq
         elif np.isscalar(wp_sq):
             self.homogeneousMedia = True
             self.wp_sq_scalar = wp_sq
@@ -88,7 +101,13 @@ class PseudoSpectral:
             self.wp_sq_time = lambda t: self.wp_sq
         elif wp_sq.size == self.N:
             self.wp_sq = wp_sq
-            self.wp_sq_time = lambda t: self.wp_sq
+            if v_wake is not None:
+                self.v_wake=v_wake
+                self.movingMedia = True
+                self.wp_sq_time=lambda t: advect(self.wp_sq,int(self.v_wake*t))
+            else:
+                self.wp_sq_time = lambda t: self.wp_sq
+            
         else:
             raise Exception('Invalid `wp_sq` supplied.')
             
@@ -165,7 +184,8 @@ class PseudoSpectral:
 
         self.timeVaryingMedia = False
         self.homogeneousMedia = False
-
+        self.movingMedia      = None
+        
         wp_sq = f['wp_sq'][()]
 
         if np.isscalar(wp_sq): # basically a scalar
@@ -247,7 +267,7 @@ class PseudoSpectral:
     def propagatePulse(self, t_span, rtol=1e-4, **kwargs):
         y0 = np.append(self.A,self.E)
         ## The different types of plasma profiles
-        if self.timeVaryingMedia:
+        if self.timeVaryingMedia or self.movingMedia:
             self.OUT = ode.solve_ivp(self.__odefun_time, t_span, y0,
                                      rtol=rtol, **kwargs)
         elif self.homogeneousMedia:
