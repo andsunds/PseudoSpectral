@@ -74,11 +74,6 @@ class PseudoSpectral:
         self.wp_sq        = None # Array
         self.wp_sq_time   = None # Function
         self.wp_sq_scalar = None # Scalar
-
-        def advect(vec,j):
-            n=vec.size
-            i=np.arange(n)
-            return vec[(i-j)%n]
         
         if callable(wp_sq):
             try:
@@ -91,7 +86,7 @@ class PseudoSpectral:
                 if v_wake is not None:
                     self.v_wake=v_wake
                     self.movingMedia = True
-                    self.wp_sq_time=lambda t: advect(self.wp_sq,int(self.v_wake*t))
+                    self.wp_sq_time=lambda t: self.__advect(self.wp_sq,int(self.v_wake*t))
                 else:
                     self.wp_sq_time = lambda t: self.wp_sq
         elif np.isscalar(wp_sq):
@@ -104,7 +99,7 @@ class PseudoSpectral:
             if v_wake is not None:
                 self.v_wake=v_wake
                 self.movingMedia = True
-                self.wp_sq_time=lambda t: advect(self.wp_sq,int(self.v_wake*t))
+                self.wp_sq_time=lambda t: self.__advect(self.wp_sq,int(self.v_wake*t))
             else:
                 self.wp_sq_time = lambda t: self.wp_sq
             
@@ -184,7 +179,9 @@ class PseudoSpectral:
 
         self.timeVaryingMedia = False
         self.homogeneousMedia = False
-        self.movingMedia      = None
+        self.movingMedia      = False
+        
+        self.v_wake   = f['v_wake'][()]
         
         wp_sq = f['wp_sq'][()]
 
@@ -195,7 +192,11 @@ class PseudoSpectral:
             self.wp_sq_time = lambda t: self.wp_sq
         elif wp_sq.size == self.N:
             self.wp_sq = wp_sq
-            self.wp_sq_time = lambda t: self.wp_sq
+            if self.v_wake is not None:
+                self.movingMedia = True
+                self.wp_sq_time=lambda t: self.__advect(self.wp_sq,int(self.v_wake*t))
+            else:
+                self.wp_sq_time = lambda t: self.wp_sq    
         elif wp_sq.size == self.N*self.nt:
             self.timeVaryingMedia = True
             self.wp_sq = wp_sq[0,:]
@@ -224,7 +225,11 @@ class PseudoSpectral:
             return obj(var)
         else:
             return obj
-    
+
+    def __advect(vec,j):
+        n=vec.size
+        i=np.arange(n)
+        return vec[(i-j)%n]
 
     ## Function that computes the derivatives of each k-component for
     ## a static (but not necessarily homogeneous) plasma frequency.
@@ -315,7 +320,8 @@ class PseudoSpectral:
         f.create_dataset('k0',   data=self.k0)
         f.create_dataset('kmax', data=self.kmax)
         #k = fft.fftfreq(self.N,self.L/self.N) * 2*np.pi
-        
+
+        f.create_dataset('v_wake', data=self.v_wake)
 
         if self.homogeneousMedia:
             f.create_dataset('wp_sq', data=self.wp_sq_scalar)
@@ -325,7 +331,7 @@ class PseudoSpectral:
                 dset_wpt[i,:] = self.wp_sq_time(self.t[i]) 
         else:
             f.create_dataset('wp_sq', data=self.wp_sq)
-            
+        
         
         f.create_dataset("fltr_1", data=self.fltr_1)
         f.create_dataset("fltr_2", data=self.fltr_2)
