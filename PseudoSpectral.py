@@ -19,7 +19,7 @@ import warnings
 class PseudoSpectral:
 
     def __init__(self, fname=None,
-                 xx=None, L=None, N=None, v_wake=None,
+                 xx=None, L=None, N=None, v_wake=0,
                  pulse=None, wp_sq=None, E_init=None,
                  wp_sq_init=None, filter_1=None, filter_2=None,
                  killReflections=False):
@@ -34,7 +34,7 @@ class PseudoSpectral:
     ## end __init__
             
     def __basic_init__(self, xx=None, L=None, N=None, pulse=None,
-                       v_wake=None, wp_sq=None, E_init=None,
+                       v_wake=0, wp_sq=None, E_init=None,
                        wp_sq_init=None, filter_1=None, filter_2=None,
                        killReflections=False):
 
@@ -60,16 +60,11 @@ class PseudoSpectral:
             ## There must be a spatial domain
             raise Exception('No spatial domain given.')
 
-        ## The profile of the squared plasma frequency
-        #self.wp_sq = self.__ifCallable(wp_sq, self.x)
-
-        ## Structure of the plasma frequency:
-        ## 
         
         self.timeVaryingMedia = False
         self.homogeneousMedia = False
         self.movingMedia = False
-
+        self.v_wake = v_wake
 
         self.wp_sq        = None # Array
         self.wp_sq_time   = None # Function
@@ -83,8 +78,7 @@ class PseudoSpectral:
                 self.wp_sq = self.wp_sq_time(0)
             except TypeError:
                 self.wp_sq = wp_sq(self.x)
-                if v_wake is not None:
-                    self.v_wake=v_wake
+                if self.v_wake != 0:
                     self.movingMedia = True
                     self.wp_sq_time=lambda t: self.__advect(self.wp_sq,int(self.v_wake*t))
                 else:
@@ -96,8 +90,7 @@ class PseudoSpectral:
             self.wp_sq_time = lambda t: self.wp_sq
         elif wp_sq.size == self.N:
             self.wp_sq = wp_sq
-            if v_wake is not None:
-                self.v_wake=v_wake
+            if self.v_wake != 0:
                 self.movingMedia = True
                 self.wp_sq_time=lambda t: self.__advect(self.wp_sq,int(self.v_wake*t))
             else:
@@ -192,9 +185,9 @@ class PseudoSpectral:
             self.wp_sq_time = lambda t: self.wp_sq
         elif wp_sq.size == self.N:
             self.wp_sq = wp_sq
-            if self.v_wake is not None:
+            if self.v_wake != 0:
                 self.movingMedia = True
-                self.wp_sq_time=lambda t: self.__advect(self.wp_sq,int(self.v_wake*t))
+                self.wp_sq_time = lambda t: self.__advect(self.wp_sq,int(self.v_wake*t))
             else:
                 self.wp_sq_time = lambda t: self.wp_sq    
         elif wp_sq.size == self.N*self.nt:
@@ -226,7 +219,7 @@ class PseudoSpectral:
         else:
             return obj
 
-    def __advect(vec,j):
+    def __advect(self,vec,j):
         n=vec.size
         i=np.arange(n)
         return vec[(i-j)%n]
@@ -287,25 +280,112 @@ class PseudoSpectral:
 
 
     
+    
     ## Function for returning the final waveform
-    def getWaveForm(self,real=True,i=None):
-        if i is None:
-            B=(self.y[0:self.N,:].T * self.fltr_2).T
-        else:
+    def getWaveForm(self,real=True,i=None,i_range=None):
+        if i is not None:
             B=self.y[0:self.N,i]*self.fltr_2
+        # elif i_range is not None:
+        #     B=self.y[0:self.N,i_range]*self.fltr_2
+        else:
+            if i_range is None: i_range=np.arange(self.nt)
+            B=(self.y[0:self.N,i_range].T * self.fltr_2).T
         
         if real:
             return fft.ifft(B,axis=0)
         else:
             return B
 
-    ## Function for returning the temporal frequencies
+    ## Function for returning the local temporal frequencies
     def getFrequencies(self,i=None):
         if i is None:
             omega=-np.imag(self.y[self.N:,:]/self.y[:self.N,:])
         else:
             omega=-np.imag(self.y[self.N:,i]/self.y[:self.N,i])
         return omega
+
+
+
+    ## Function for getting the field time evolution at a specific point
+    def getTimeEvolution(self,ix=None,it_range=None,
+                         x=None,t_span=None):
+        
+        if (ix is None) and (x is not None):
+            ix = np.argmax(self.x>=x)
+        else:
+            ValueError("You must supply a value for `ix` or `x`.")
+
+        if (it_range is None):
+            if (t_span is not None):
+                it_range = np.where(np.logical_and(self.t>=t_span[0],
+                                                   self.t<=t_span[1]))
+            else:
+                it_range = np.arange(self.nt)
+            
+        # if it_range is not None:
+        #     c = self.getWaveForm(real=True,i_range=it_range)
+        # elif t_span is not None:
+        #     i_min = np.argmax(self.t>=t_span[0])
+        #     i_max = np.argmax(self.t<t_span[1])-1
+        #     ## Note that argmax will return 0 if t_span[1] is beyond
+        #     ## the range of self.t, and we thus get the desired
+        #     ## behavior that i_max=-1 if that happens.
+        #     c = self.getWaveForm(real=True,i_span=[i_min,i_max])
+        # else:
+        #     c = self.getWaveForm(real=True)
+        # return c[ix,:]
+        c = self.getWaveForm(real=True,i_range=it_range)
+        return c[ix,:]
+    
+    ## Function for extracting the temporal frequency spectrum at a
+    ## location `self.x[ix]` (or `x`), in the time span t_span[0] to
+    ## t_span[1].
+    def getFrequencySpectrum(self,ix=None,it_range=None,
+                             x=None,t_span=None,
+                             fft_envelope=None, return_omega=False):
+        
+        if (ix is None) and (x is not None):
+            ix = np.argmax(self.x>=x)
+        else:
+            ValueError("You must supply a value for `ix` or `x`.")
+
+        if (it_range is None):
+            if (t_span is not None):
+                it_range = np.where(np.logical_and(self.t>=t_span[0],
+                                                   self.t<=t_span[1]))
+            else:
+                it_range = np.arange(self.nt)
+
+        c = self.getTimeEvolution(ix,it_range)
+        n = it_range.size
+
+        if fft_envelope is not None:
+            fft_envelope_array = self.__ifCallable(fft_envelope,self.t[it_range])
+            try:
+                C = fft.fft(c*fft_envelope_array)
+            except ValueError:
+                Warning("The size of fft_envelope does not fit the chosen time range. Proceeding without envelope.")
+                C = fft.fft(c)
+        else:
+            C = fft.fft(c)
+
+        t_length = self.t[it_range[-1]] - self.t[it_range[0]]
+        omega=fft.fftfreq(n,t_length/n) * 2*np.pi
+
+        if return_omega:
+            return omega, C
+        else:
+            return C
+
+
+
+
+
+
+
+
+
+        
 
     ## Function for saving data to a hdf5 file.
     def saveData(self,fname='spectral_data.h5'):
