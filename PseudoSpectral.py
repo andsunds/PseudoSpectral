@@ -32,8 +32,7 @@ class PseudoSpectral:
         else:            
             self.__basic_init__(xx=xx, L=L, N=N, pulse=pulse,
                                 v_wake=v_wake, wp_sq=wp_sq, E_init=E_init,
-                                wp_sq_init=wp_sq_init, filter_1=filter_1, filter_2=filter_2,
-                                stopBackLooping=stopBackLooping)
+                                wp_sq_init=wp_sq_init, filter_1=filter_1, filter_2=filter_2)
     ## end __init__
             
     def __basic_init__(self, xx=None, L=None, N=None, pulse=None,
