@@ -22,21 +22,23 @@ class PseudoSpectral:
                  xx=None, L=None, N=None, v_wake=0,
                  pulse=None, wp_sq=None, E_init=None,
                  wp_sq_init=None, filter_1=None, filter_2=None,
-                 killReflections=False):
+                 killReflections=None):
+
+        if killReflections is not None:
+            DeprecationWarning("Option `killReflections` is deprecated and will be removed.")
         
         if fname is not None: 
             self.__file_init__(fname)
-        else:
+        else:            
             self.__basic_init__(xx=xx, L=L, N=N, pulse=pulse,
                                 v_wake=v_wake, wp_sq=wp_sq, E_init=E_init,
                                 wp_sq_init=wp_sq_init, filter_1=filter_1, filter_2=filter_2,
-                                killReflections=killReflections)
+                                stopBackLooping=stopBackLooping)
     ## end __init__
             
     def __basic_init__(self, xx=None, L=None, N=None, pulse=None,
                        v_wake=0, wp_sq=None, E_init=None,
-                       wp_sq_init=None, filter_1=None, filter_2=None,
-                       killReflections=False):
+                       wp_sq_init=None, filter_1=None, filter_2=None):
 
         ## Initialization of the output variable
         self.OUT = None
@@ -121,8 +123,7 @@ class PseudoSpectral:
 
         ## Pulse real waveform (vector potential)
         self.a = self.__ifCallable(pulse, self.x)
-        self.killReflections = killReflections
-
+        
         ## Fourier decomposition (spatial) of the pulse
         self.A = fft.fft(self.a)
 
@@ -144,6 +145,7 @@ class PseudoSpectral:
         self.w_init[self.Nf:] *= -1
         ## First time derivative (= electric field)
         self.E  = -1j * self.w_init * self.A
+
     ### end __basic_init__
 
 
@@ -321,19 +323,7 @@ class PseudoSpectral:
                                                    self.t<=t_span[1]))
             else:
                 it_range = np.arange(self.nt)
-            
-        # if it_range is not None:
-        #     c = self.getWaveForm(real=True,i_range=it_range)
-        # elif t_span is not None:
-        #     i_min = np.argmax(self.t>=t_span[0])
-        #     i_max = np.argmax(self.t<t_span[1])-1
-        #     ## Note that argmax will return 0 if t_span[1] is beyond
-        #     ## the range of self.t, and we thus get the desired
-        #     ## behavior that i_max=-1 if that happens.
-        #     c = self.getWaveForm(real=True,i_span=[i_min,i_max])
-        # else:
-        #     c = self.getWaveForm(real=True)
-        # return c[ix,:]
+        
         c = self.getWaveForm(real=True,i_range=it_range)
         return c[ix,:]
     
@@ -388,7 +378,7 @@ class PseudoSpectral:
         
 
     ## Function for saving data to a hdf5 file.
-    def saveData(self,fname='spectral_data.h5'):
+    def saveData(self,fname='spectral_data.h5', save_wp_sq_time=False):
         
         f = h5py.File(fname, "w")
 
@@ -405,7 +395,7 @@ class PseudoSpectral:
 
         if self.homogeneousMedia:
             f.create_dataset('wp_sq', data=self.wp_sq_scalar)
-        elif self.timeVaryingMedia:
+        elif self.timeVaryingMedia and save_wp_sq_time:
             dset_wpt = f.create_dataset('wp_sq', (self.nt, self.N) )
             for i in range(self.nt):
                 dset_wpt[i,:] = self.wp_sq_time(self.t[i]) 
