@@ -293,9 +293,28 @@ class PseudoSpectral:
             B=(self.y[0:self.N,i_range].T * self.fltr_2).T
         
         if real:
-            return fft.ifft(B,axis=0)
+            ## Return the real part of the inverse transfor if all the
+            ## imaginary parts are within 1e4 mashine-epsilons from 0.
+            return np.real_if_close(fft.ifft(B,axis=0),tol=1e4)
         else:
             return B
+
+    ## Function for returning the electric field
+    def getEField(self,real=True,i=None,i_range=None):
+        if i is not None:
+            E=self.y[self.N:,i]*self.fltr_2
+        # elif i_range is not None:
+        #     B=self.y[0:self.N,i_range]*self.fltr_2
+        else:
+            if i_range is None: i_range=np.arange(self.nt)
+            E=(self.y[self.N:,i_range].T * self.fltr_2).T
+        
+        if real:
+            ## Return the real part of the inverse transfor if all the
+            ## imaginary parts are within 1e4 mashine-epsilons from 0.
+            return np.real_if_close(fft.ifft(E,axis=0),tol=1e4)
+        else:
+            return E
 
     ## Function for returning the local temporal frequencies
     def getFrequencies(self,i=None):
