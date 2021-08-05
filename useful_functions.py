@@ -19,7 +19,7 @@ def sigmoid(cutoff, width, direction=-1, amplitude=1,symmetric=True,
         return lambda s: amplitude / ( 1 + np.exp(-np.sign(direction)*(sym(s)-cutoff)/width) ) \
             / ( 1 + np.exp(np.sign(direction)*(sym(s)-cutoff_end)/width_end) )
     else:
-        return lambda s: amplitude / ( 1 + np.exp(-np.sign(direction)*(np.abs(s)-cutoff)/width) )
+        return lambda s: amplitude / ( 1 + np.exp(-np.sign(direction)*(sym(s)-cutoff)/width) )
 
 
 
