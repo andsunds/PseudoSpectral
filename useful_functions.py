@@ -7,8 +7,8 @@ import scipy as sp
 
 
 ### The sigmoid function, used for spectral filtering
-def sigmoid(cutoff, width, direction=-1, amplitude=1,symmetric=True,
-            cutoff_end=None, width_end=None):
+def sigmoid(cutoff, width, direction=-1, amplitude=1,
+            cutoff_end=None, width_end=None,symmetric=True):
     if symmetric:
         sym = lambda s : np.absolute(s)
     else:
