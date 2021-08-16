@@ -22,6 +22,7 @@ class PseudoSpectral:
                  xx=None, L=None, N=None, v_wake=0,
                  pulse=None, wp_sq=None, E_init=None,
                  wp_sq_init=None, filter_1=None, filter_2=None,
+                 pulse_center=None,
                  killReflections=None):
 
         if killReflections is not None:
@@ -32,12 +33,14 @@ class PseudoSpectral:
         else:            
             self.__basic_init__(xx=xx, L=L, N=N, pulse=pulse,
                                 v_wake=v_wake, wp_sq=wp_sq, E_init=E_init,
-                                wp_sq_init=wp_sq_init, filter_1=filter_1, filter_2=filter_2)
+                                wp_sq_init=wp_sq_init, filter_1=filter_1, filter_2=filter_2,
+                                pulse_center=pulse_center)
     ## end __init__
             
     def __basic_init__(self, xx=None, L=None, N=None, pulse=None,
                        v_wake=0, wp_sq=None, E_init=None,
-                       wp_sq_init=None, filter_1=None, filter_2=None):
+                       wp_sq_init=None, filter_1=None, filter_2=None,
+                       pulse_center=None):
 
         ## Initialization of the output variable
         self.OUT = None
@@ -122,28 +125,42 @@ class PseudoSpectral:
 
         ## Pulse real waveform (vector potential)
         self.a = self.__ifCallable(pulse, self.x)
-        
         ## Fourier decomposition (spatial) of the pulse
         self.A = fft.fft(self.a)
+
+        self.pulse_center = None
+        if pulse_center is not None:
+            self.pulse_center = pulse_center
 
         ## The initial first time derivative (electric field) is
         ## calculated using the plasma dispersion.
         if E_init is not None:
             self.E  = E_init
-        elif wp_sq_init is not None:
-            ## If initial omega_p is give, we use that.
-            self.w_init = np.sqrt(wp_sq_init+self.k_sq)
         else:
-            ## Else, we use the omega_p at the peak of the pulse.
-            i_pulse = np.argmax(np.absolute(self.a))
-            self.w_init = np.sqrt(self.wp_sq[i_pulse]+self.k_sq)
+            w_sq = None
+            if wp_sq_init is not None:
+                w_sq = wp_sq_init+self.k_sq
+                ## If initial omega_p is give, we use that.
+                self.w_init = np.sqrt(w_sq+0j)
+            else:
+                ## Else, we use the omega_p at the peak of the pulse.
+                if self.pulse_center is not None:
+                    i_pulse = np.argmax(-np.absolute(self.x-pulse_center))
+                else:
+                    i_pulse = np.argmax(np.absolute(self.a))
+                w_sq = self.wp_sq[i_pulse]+self.k_sq
+                self.w_init = np.sqrt(w_sq+0j)
         
-        ## The (temporal) frequencies should have the same sign as
-        ## each corresponding wavenumber. Otherwise the pulse splits
-        ## in two counter-propagating pulses.
-        self.w_init[self.Nf:] *= -1
-        ## First time derivative (= electric field)
-        self.E  = -1j * self.w_init * self.A
+            # ## The (temporal) frequencies should have the same sign as
+            # ## each corresponding wavenumber. Otherwise the pulse splits
+            # ## in two counter-propagating pulses.
+            # self.w_init[self.Nf:] *= -1
+            self.w_init.real *= np.sign(self.k)
+            self.w_init.imag *= -np.sign(w_sq)
+            ## First time derivative (= electric field)
+            self.E  = -1j * self.w_init * self.A
+            self.E[0] = 0
+            self.E[self.Nf]=0
 
     ### end __basic_init__
 
@@ -164,12 +181,13 @@ class PseudoSpectral:
         self.k    = fft.fftfreq(self.N,self.L/self.N) * 2*np.pi
         self.k_sq = self.k**2   # Wavenumber squared
 
-        self.nt = f['nt'][()]
-        self.t  = f['t'][()]
-        self.y = np.empty((2*self.N, self.nt), dtype=np.complex128)
+        self.nt     = f['nt'][()]
+        self.t      = f['t'][()]
+        self.y      = np.empty((2*self.N, self.nt), dtype=np.complex128)
         self.y.real = f['y/real'][()]
         self.y.imag = f['y/imag'][()]
-
+        
+        self.pulse_center  = f['pulse_center'][()]
 
         self.timeVaryingMedia = False
         self.homogeneousMedia = False
@@ -403,6 +421,8 @@ class PseudoSpectral:
         f.create_dataset('x', data=self.x)
         f.create_dataset('L',  data=self.L)
         f.create_dataset('N',  data=self.N)
+
+        f.create_dataset('pulse_center', data=self.pulse_center)
 
         f.create_dataset('Nf',   data=self.Nf)
         f.create_dataset('k0',   data=self.k0)
