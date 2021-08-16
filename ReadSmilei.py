@@ -226,9 +226,15 @@ class ReadSmilei:
     ## end extractBinnedProfile
 
     # # TODO:
-    # def interpolatedBinnedProfile(self,N_ps,L_ps):
+    # It's probably best to try to interpolate with some constant
+    # velocity between time steps. That velocity could be infered with
+    # some corelation function between the timesteps. Ideally, that
+    # correlation can be evaluated with the data from
+    # `extractBinnedProfile` as it is written now.
+    #
+    # def interpolatedBinnedProfile(self,N_ps,L_ps,**kwargs):
     #     if self.wp_sq is None:
-    #         self.extractBinnedProfile()
+    #         self.extractBinnedProfile(**kwargs)
         
 
 
