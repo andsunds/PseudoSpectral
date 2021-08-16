@@ -59,8 +59,8 @@ class ReadSmilei:
         self.x_t                  = None
         self.wp_sq                = None
 
-        if S.valid:
-            self.__basic_init__()
+        if self.S.valid:
+            self.__basic_init__(ps_l0_SI)
         else:
             try:
                 self.__file_init(smilei_path)
@@ -68,7 +68,7 @@ class ReadSmilei:
                 Warning(f'{smilei_path} does not lead to any valid Smilei simulation or file.')
                 
         
-    def __basic_init__(self):
+    def __basic_init__(self,ps_l0_SI):
         ## Smilei to SI units
         try:
             self.tR2fs = 1./self.S.namelist.fs
