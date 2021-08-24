@@ -2,17 +2,22 @@
 ################################################################################
 import happi
 import numpy as np
+from numpy.fft import fft, ifft
 #import scipy as sp
 #import constants_SI as SI # SI constants
 import warnings
 
 
-def sigma(x,w,L=1):
-    return np.exp(-1/(x*2/w)**2)*np.exp(-1/((L-x)*2/w)**2)
-
 def rolling_average(x, n_avg):
     return np.convolve(x, np.ones(n_avg), 'valid') / n_avg
 
+
+def periodic_corr(x, y):
+    # Periodic correlation, implemented using the FFT.
+    # x and y must be real sequences with the same length.
+
+    return np.real_if_close(ifft( fft(x).conj() * fft(y) ))
+    #return np.real_if_close(ifft( fft(x) * fft(y).conj() ))
 
 class ReadSmilei:
      
@@ -44,6 +49,9 @@ class ReadSmilei:
         self.n0_e                 = None
 
         ##### Initializing data attributes
+        self.binned               = None
+        self.binnedInit           = False
+        self.n_binning            = None
         ## Smilei saved step info
         self.timeSteps            = None
         self.times                = None
@@ -53,11 +61,15 @@ class ReadSmilei:
         self.y_bins               = None
         self.z_bins               = None
         ## Smilei simulation box info
+        self.nx_avg               = None
         self.Nx                   = None
         self.Lx                   = None
         ## Variables containing the data
         self.x_t                  = None
         self.wp_sq                = None
+
+        ### PS data
+        self.x_ps                 = None
 
         if self.S.valid:
             self.__basic_init__(ps_l0_SI)
@@ -154,27 +166,50 @@ class ReadSmilei:
             return vx * max(0, n*dt-t_start)
         elif t is not None:
             return vx * max(0, t-t_start)
+    
+    ### A function for initializing the profile to be extracted
+    def initBinnedProfile(self, n_binning=None,nx_avg=None):
+        #self.n_binning = n_binning
+        if n_binning is not None:
+            if self.n_binning != n_binning:
+                Warning(f'Changing particle binner from {self.n_binning} to {n_binning}.')
+                self.n_binning = n_binning
+        elif self.n_binning is None:
+            Warning("No particle binning nbr supplied, using 0.")
+            self.n_binning = 0
 
-    ### Function for extracting on-axis profile of binned data
-    def extractBinnedProfile(self, n_binning=0, nx_avg=1, envelope=None, max_off_axis=None):
+        if nx_avg is not None:
+            if self.nx_avg != nx_avg:
+                Warning(f'Changing nx_avg from {self.nx_avg} to {nx_avg}.')
+                self.nx_avg = nx_avg
+        elif self.nx_avg is None:
+            self.nx_avg = 1
+            
 
-        binned = self.S.ParticleBinning(n_binning)
-        self.x_bins = binned.getAxis("moving_x")
-        self.y_bins = binned.getAxis("y")
-        self.z_bins = binned.getAxis("z")
+        self.binned    = self.S.ParticleBinning(self.n_binning)
+        self.x_bins    = self.binned.getAxis("moving_x")
+        self.y_bins    = self.binned.getAxis("y")
+        self.z_bins    = self.binned.getAxis("z")
         
         # self.y_bins=None; self.z_bins=None
         # if self.dimensions>1: self.y_bins = binned.getAxis("y")
         # if self.dimensions>2: self.z_bins = binned.getAxis("z")
 
-        self.timeSteps = binned.getTimesteps()
-        self.times     = binned.getTimes()
+        self.timeSteps = self.binned.getTimesteps()
+        self.times     = self.binned.getTimes()
         self.N_times   = self.timeSteps.size
 
-        self.Nx = self.x_bins.size +1-nx_avg
         self.Lx = self.x_bins[-1]
         
-        x_avg  = rolling_average(self.x_bins, nx_avg)
+        self.binnedInit = True
+
+    ### Function for extracting on-axis profile of binned data
+    def extractBinnedProfile(self, n_binning=None, nx_avg=None, envelope=None, max_off_axis=None):
+        if not self.binnedInit:
+            self.initBinnedProfile(n_binning,nx_avg)
+
+        self.Nx = self.x_bins.size +1-self.nx_avg
+        x_avg  = rolling_average(self.x_bins, self.nx_avg)
         
         self.x_t   = np.zeros( (self.N_times, self.Nx) )
         self.wp_sq = np.zeros( self.x_t.shape )
@@ -191,7 +226,7 @@ class ReadSmilei:
             self.x_t[i,:] = x[i_sort]
             
             ## Binned data
-            wp_sq  = binned.getData(timestep=n)[0]
+            wp_sq  = self.binned.getData(timestep=n)[0]
             
             ## Averaging out the z direction
             if len(self.z_bins)>0:
@@ -215,7 +250,7 @@ class ReadSmilei:
                     wp_sq  = np.mean(wp_sq, axis=1)
             ## end transverse averages
             
-            wp_sq  = rolling_average(wp_sq, nx_avg)
+            wp_sq  = rolling_average(wp_sq, self.nx_avg)
                
             if callable(envelope):
                 s  = envelope(x_avg)
@@ -225,19 +260,71 @@ class ReadSmilei:
         ## end for time steps
     ## end extractBinnedProfile
 
-    # # TODO:
-    # It's probably best to try to interpolate with some constant
-    # velocity between time steps. That velocity could be infered with
-    # some corelation function between the timesteps. Ideally, that
-    # correlation can be evaluated with the data from
-    # `extractBinnedProfile` as it is written now.
-    #
-    # def interpolatedBinnedProfile(self,N_ps,L_ps,**kwargs):
-    #     if self.wp_sq is None:
-    #         self.extractBinnedProfile(**kwargs)
+    ##
+    def initPSInterp(self,x_ps, ps_l0_SI=None):
+        ## The unit conversion
         
+        if ps_l0_SI is not None:
+            Warning(f"Now using ps_l0_SI = {ps_l0_SI}.")
+            self.sm2ps_L     = self.sm_l0_SI/ps_l0_SI
+            self.sm2ps_T     = self.sm2ps_L
+            self.sm2ps_omega = 1./self.sm2ps_T
+            self.sm2ps_dens  = self.sm2ps_omega**2
+        #
+        self.x_ps = x_ps
+    ## end initPSInterp
 
+  
+    ## A function which interpolates the Smilei data in time. This
+    ## function estimates a propagation velocity using a periodic
+    ## correlation measurement.
+    def timeInterp(self,t=None,t_ps=None,**kwargs):
+        if self.wp_sq is None:
+            self.extractBinnedProfile(**kwargs)
+        #
+        if (t_ps is None) and (t is None):
+            Warning("No time coordinate supplied, must have either t or t_ps.")
+        elif (t_ps is not None) and (t is not None):
+            Warning("Both t and t_ps supplied, using t.")
+        elif (t_ps is not None) and (t is None):
+            t = t_ps / self.sm2ps_T
+        # else: #do nothing
+                
+        ## time index
+        i  = np.argmax(self.times > t) - 1
+        t1 = self.times[i]
+        t2 = self.times[i+1]
+        dt = t2 - t1
+        a  = (t2 - t) / (t2 - t1)
 
+        corr = periodic_corr(self.wp_sq[i,:],self.wp_sq[i+1,:])
+
+        x_interp = a*self.x_t[i,:] + (1-a)*self.x_t[i+1,:]
+        
+        ## Spatial indices
+        j_c = np.argmax(x_interp/dt > 1) # index corresponding  to speed of light
+        j_v = np.argmax(corr[:j_c]) # finding the index that best matches the velocity
+        v   = x_interp[j_v]/dt
+
+        ## Rolling back the next data set, and then interpolate
+        wp_sq_interp = a*self.wp_sq[i,:] + (1-a)*np.roll(self.wp_sq[i+1,:],-j_v)
+        x_t_tmp   = a*self.x_t[i,:] + (1-a)*self.x_t[i+1,:] + a*v*dt
+        
+        x_t_interp = x_t_tmp % self.Lx
+        x_t_interp[np.logical_and(x_t_interp==0., x_t_tmp//self.Lx>=1)] = self.Lx
+        
+        i_sort = np.argsort(x_t_interp % self.Lx)
+        #x_t_interp = x_t_interp[i_sort]
+        #wp_sq_interp = wp_sq_interp[i_sort]
+
+        return x_t_interp[i_sort], wp_sq_interp[i_sort]
+    ## end timeInterp
+
+    ## Function to be used by the PS code, for evaluating wp_sq on the
+    ## PS grid, at time t_ps. [All in PS units.]
+    def xtInterp_ps(self,t_ps):
+        x_t, wp_sq = self.timeInterp(t_ps=t_ps)
+        return np.interp(self.x_ps, x_t*self.sm2ps_L, wp_sq*self.sm2ps_omega**2)
 
     
 

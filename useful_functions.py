@@ -21,6 +21,10 @@ def sigmoid(cutoff, width, direction=-1, amplitude=1,
     else:
         return lambda s: amplitude / ( 1 + np.exp(-np.sign(direction)*(sym(s)-cutoff)/width) )
 
+### A flat-top envelope with smooth feet
+def flatTopSmooth(rise,L=1):
+    return lambda x: np.exp(-1/(x*2/rise)**2)*np.exp(-1/((L-x)*2/rise)**2)
+
 
 
 ### Exponential cosine, generates highly peaked, periodig curves
