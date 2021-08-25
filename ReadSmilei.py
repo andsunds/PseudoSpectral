@@ -321,19 +321,19 @@ class ReadSmilei:
             ## Spatial indices
             j_c = np.argmax(x_interp/dt > 1)    # index corresponding  to speed of light
             j_v = np.argmax(correleation[:j_c]) # Finding index that best match the velocity
-            v   = x_interp[j_v]/dt              # Computing the corresponding velocity
-            
+            v   = x_interp[j_v]/dt              # Computing the corresponding velocity            
+
             ## Rolling back the next data set by corresponding
             ## velocity index, and then interpolate
             wp_sq_interp = a*self.wp_sq[i,:] + (1-a)*np.roll(self.wp_sq[i+1,:],-j_v)
             ## Interpolating x coordinates, and shifting due to velocity
-            x_t_tmp   = a*self.x_t[i,:] + (1-a)*self.x_t[i+1,:] + a*v*dt
+            x_t_tmp   = a*self.x_t[i,:] + (1-a)*self.x_t[i+1,:] + (1-a)*v*dt
             ## Rolling the shift back onto the periodic domain
             x_t_interp = x_t_tmp % self.Lx
             ## Coorinates on Lx stay on Lx
             x_t_interp[np.logical_and(x_t_interp==0., x_t_tmp//self.Lx>=1)] = self.Lx
             ## Finding the sorted indices
-            i_sort = np.argsort(x_t_interp % self.Lx)
+            i_sort = np.argsort(x_t_interp)
             ## Returing the sorted x_t and wp_sq (with same sort).
             return x_t_interp[i_sort], wp_sq_interp[i_sort]
         ## end if time
