@@ -166,6 +166,9 @@ class ReadSmilei:
             return vx * max(0, n*dt-t_start)
         elif t is not None:
             return vx * max(0, t-t_start)
+        else:
+            ValueError("A timestep `n` or time `t` must be supplied.")
+            
     
     ### A function for initializing the profile to be extracted
     def initBinnedProfile(self, n_binning=None,nx_avg=None):
@@ -263,7 +266,6 @@ class ReadSmilei:
     ##
     def initPSInterp(self,x_ps, ps_l0_SI=None):
         ## The unit conversion
-        
         if ps_l0_SI is not None:
             Warning(f"Now using ps_l0_SI = {ps_l0_SI}.")
             self.sm2ps_L     = self.sm_l0_SI/ps_l0_SI
@@ -289,66 +291,86 @@ class ReadSmilei:
         elif (t_ps is not None) and (t is None):
             t = t_ps / self.sm2ps_T
         # else: #do nothing
-                
-        ## time index
-        i  = np.argmax(self.times > t) - 1
-        t1 = self.times[i]
-        t2 = self.times[i+1]
-        dt = t2 - t1
-        a  = (t2 - t) / (t2 - t1)
 
-        corr = periodic_corr(self.wp_sq[i,:],self.wp_sq[i+1,:])
+        if t <= self.times[0]:
+            ## For times before first saved time, return first saved profile
+            return self.x_t[0,:], self.wp_sq[0,:]
+        elif t > self.times[-1]:
+            ## For times after last saved time, return last saved profile
+            return self.x_t[-1,:], self.wp_sq[-1,:]
+        else:
+            ## For intermediary times, we interpolate in time and
+            ## space, by finding the velocity of the wake and
+            ## interpolating the shape of the wake together with the
+            ## translation due to velocity.
+            i  = np.argmax(self.times > t) - 1 # time index closest to requested time
+            t1 = self.times[i]                 # closest time below t
+            t2 = self.times[i+1]               # closest time above t
+            dt = t2 - t1                       # 
+            a  = (t2 - t) / (t2 - t1)          # intepolation coefficient
 
-        x_interp = a*self.x_t[i,:] + (1-a)*self.x_t[i+1,:]
-        
-        ## Spatial indices
-        j_c = np.argmax(x_interp/dt > 1) # index corresponding  to speed of light
-        j_v = np.argmax(corr[:j_c]) # finding the index that best matches the velocity
-        v   = x_interp[j_v]/dt
-
-        ## Rolling back the next data set, and then interpolate
-        wp_sq_interp = a*self.wp_sq[i,:] + (1-a)*np.roll(self.wp_sq[i+1,:],-j_v)
-        x_t_tmp   = a*self.x_t[i,:] + (1-a)*self.x_t[i+1,:] + a*v*dt
-        
-        x_t_interp = x_t_tmp % self.Lx
-        x_t_interp[np.logical_and(x_t_interp==0., x_t_tmp//self.Lx>=1)] = self.Lx
-        
-        i_sort = np.argsort(x_t_interp % self.Lx)
-        #x_t_interp = x_t_interp[i_sort]
-        #wp_sq_interp = wp_sq_interp[i_sort]
-
-        return x_t_interp[i_sort], wp_sq_interp[i_sort]
+            ## We calculate the periodic correlation of the two
+            ## profiles. The maximum of this, should give the index
+            ## shift corresponiding to the velocity of the wake.
+            correleation = periodic_corr(self.wp_sq[i,:],self.wp_sq[i+1,:])
+            ## Interpolate the (unshifted) x coordinates. (This should
+            ## be unnecessary, since the x coordinates shouldn't
+            ## change.)
+            x_interp = a*self.x_t[i,:] + (1-a)*self.x_t[i+1,:]
+            
+            ## Spatial indices
+            j_c = np.argmax(x_interp/dt > 1)    # index corresponding  to speed of light
+            j_v = np.argmax(correleation[:j_c]) # Finding index that best match the velocity
+            v   = x_interp[j_v]/dt              # Computing the corresponding velocity
+            
+            ## Rolling back the next data set by corresponding
+            ## velocity index, and then interpolate
+            wp_sq_interp = a*self.wp_sq[i,:] + (1-a)*np.roll(self.wp_sq[i+1,:],-j_v)
+            ## Interpolating x coordinates, and shifting due to velocity
+            x_t_tmp   = a*self.x_t[i,:] + (1-a)*self.x_t[i+1,:] + a*v*dt
+            ## Rolling the shift back onto the periodic domain
+            x_t_interp = x_t_tmp % self.Lx
+            ## Coorinates on Lx stay on Lx
+            x_t_interp[np.logical_and(x_t_interp==0., x_t_tmp//self.Lx>=1)] = self.Lx
+            ## Finding the sorted indices
+            i_sort = np.argsort(x_t_interp % self.Lx)
+            ## Returing the sorted x_t and wp_sq (with same sort).
+            return x_t_interp[i_sort], wp_sq_interp[i_sort]
+        ## end if time
     ## end timeInterp
 
     ## Function to be used by the PS code, for evaluating wp_sq on the
     ## PS grid, at time t_ps. [All in PS units.]
-    def xtInterp_ps(self,t_ps):
+    def xtInterpPS(self,t_ps):
+        ## First interpolate in time
         x_t, wp_sq = self.timeInterp(t_ps=t_ps)
+        ## Then interpolate in space onto the PS mesh (with PS normalization)
         return np.interp(self.x_ps, x_t*self.sm2ps_L, wp_sq*self.sm2ps_omega**2)
 
+    
     
 
     ## Function for saving data to a hdf5 file.
     def saveSmileiData(self,fname='smilei_data.h5'):
-        
+        ## hdf5 file to be written to.
         f = h5py.File(fname, "w")
 
-        
+        ## Binning parameters
         f.create_dataset('Lx',  data=self.Lx)
         f.create_dataset('Nx',  data=self.Nx)
         f.create_dataset('times',  data=self.times)
         f.create_dataset('N_times', data=self.N_times)
+        ## Binned profiles
         f.create_dataset('x_t', data=self.x_t)
         f.create_dataset('wp_sq', data=self.wp_sq)
-
+        ## Smilei simulation parameters
         f.create_dataset('N_cells',  data=self.N_cells)
         f.create_dataset('L_cells',  data=self.L_cells)
         f.create_dataset('dimensions',  data=self.dimensions)
-        
+        ## Smilei physics parameters
         f.create_dataset('t_pumpPeak', data=self.t_pumpPeak)
         f.create_dataset('n0_e',  data=self.n0_e)
-
-        
+        ## Smilei moving window
         f.create_dataset('t_start_movingwindow', data=self.t_start_movingwindow)
         f.create_dataset('vx_movingwindow', data=self.vx_movingwindow)
         
