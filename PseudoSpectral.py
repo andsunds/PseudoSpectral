@@ -142,12 +142,14 @@ class PseudoSpectral:
                 w_sq = wp_sq_init+self.k_sq
                 ## If initial omega_p is give, we use that.
                 self.w_init = np.sqrt(w_sq+0j)
+                self.pulse_center = 0
             else:
                 ## Else, we use the omega_p at the peak of the pulse.
                 if self.pulse_center is not None:
                     i_pulse = np.argmax(-np.absolute(self.x-pulse_center))
                 else:
                     i_pulse = np.argmax(np.absolute(self.a))
+                    self.pulse_center = self.x[i_pulse]
                 w_sq = self.wp_sq[i_pulse]+self.k_sq
                 self.w_init = np.sqrt(w_sq+0j)
         
