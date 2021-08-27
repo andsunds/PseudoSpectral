@@ -48,11 +48,11 @@ class PseudoSpectral:
         self.nt  = None
 
         if (L is not None) and (N is not None):
-            self.L = L  # Box size
-            self.N = N  # Nbr of grid points
+            self.L = L       # Box size
+            self.N = int(N)  # Nbr of grid points
             ## We don't include the end point in x, since the domain is
             ## L-periodic.
-            self.x = np.linspace(0,L,num=N, endpoint=False)
+            self.x = np.linspace(0,L,num=self.N, endpoint=False)
             if xx is not None:
                 warnings.warn('Input `xx` specified, but using `L` and `N` instead.')
         elif xx is not None:
