@@ -27,6 +27,8 @@ class ReadSmilei:
     def __init__(self, smilei_path, ps_l0_SI=None):
 
         ##### Initializing attributes to None
+        self.SPath                = None
+        
         self.tR2fs                = None
         self.lR2um                = None
 
@@ -76,6 +78,7 @@ class ReadSmilei:
         self.S = happi.Open(smilei_path,verbose=False)
         
         if self.S.valid:
+            self.SPath = smilei_path
             self.__basic_init__(ps_l0_SI)
         else:
             try:
@@ -137,9 +140,17 @@ class ReadSmilei:
     def __file_init__(self, fname,ps_l0_SI):
         
         f = h5py.File(fname, "r")
+
+        try:
+            self.SPath            = f['SPath'][()].decode("utf-8")
+            self.n_binning        = f['n_binning'][()]
+        except KeyError:
+            self.SPath            = None
+            self.n_binning        = None
+            
         
         self.Lx                   = f['Lx'][()]
-        self.Nx                   = int(f['Nx'][()])
+        self.Nx                   = f['Nx'][()]
         self.times                = f['times'][()]
         self.x_t                  = f['x_t'][()]
         self.wp_sq                = f['wp_sq'][()]
@@ -235,7 +246,7 @@ class ReadSmilei:
     ###
     def _extractBinnedProfile(self, n_binning, nx_avg, envelope, max_off_axis):
         if not self.binnedInit:
-            self.initBinnedProfile(n_binning,nx_avg)
+            self._initBinnedProfile(n_binning,nx_avg)
 
         self.Nx = self.x_bins.size +1-self.nx_avg
         x_avg  = rolling_average(self.x_bins, self.nx_avg)
@@ -454,29 +465,31 @@ class ReadSmilei:
         ## hdf5 file to be written to.
         f = h5py.File(fname, "w")
 
+        f.create_dataset('SPath',                data=self.SPath.encode("utf-8"))            
         ## Binning parameters
-        f.create_dataset('Nx',  data=self.Nx)
-        f.create_dataset('times',  data=self.times)
-        f.create_dataset('N_times', data=self.N_times)
+        f.create_dataset('n_binning',            data=self.n_binning, dtype=np.uint32)
+        f.create_dataset('Nx',                   data=self.Nx,        dtype=np.uint32)
+        f.create_dataset('times',                data=self.times)
+        f.create_dataset('N_times',              data=self.N_times)
         ## Binned profiles
-        f.create_dataset('x_t', data=self.x_t)
-        f.create_dataset('wp_sq', data=self.wp_sq)
+        f.create_dataset('x_t',                  data=self.x_t)
+        f.create_dataset('wp_sq',                data=self.wp_sq)
         ## Smilei simulation parameters
-        f.create_dataset('N_cells',  data=self.N_cells)
-        f.create_dataset('L_cells',  data=self.L_cells)
-        f.create_dataset('dimensions',  data=self.dimensions)
-        f.create_dataset('Lx',  data=self.Lx)
-        f.create_dataset('dt',  data=self.dt)
+        f.create_dataset('N_cells',              data=self.N_cells)
+        f.create_dataset('L_cells',              data=self.L_cells)
+        f.create_dataset('dimensions',           data=self.dimensions)
+        f.create_dataset('Lx',                   data=self.Lx)
+        f.create_dataset('dt',                   data=self.dt)
         ## Smilei physics parameters
-        f.create_dataset('t_pumpPeak', data=self.t_pumpPeak)
-        f.create_dataset('sm_l0_SI', data=self.sm_l0_SI)
-        f.create_dataset('n0_e',  data=self.n0_e)
-        f.create_dataset('x_vacuum',  data=self.x_vacuum)
+        f.create_dataset('t_pumpPeak',           data=self.t_pumpPeak)
+        f.create_dataset('sm_l0_SI',             data=self.sm_l0_SI)
+        f.create_dataset('n0_e',                 data=self.n0_e)
+        f.create_dataset('x_vacuum',             data=self.x_vacuum)
         ## Smilei moving window
         f.create_dataset('t_start_movingwindow', data=self.t_start_movingwindow)
-        f.create_dataset('vx_movingwindow', data=self.vx_movingwindow)
+        f.create_dataset('vx_movingwindow',      data=self.vx_movingwindow)
         ## Unit conversion factor      
-        f.create_dataset("sm2ps_L", data=self.sm2ps_L)
+        f.create_dataset("sm2ps_L",              data=self.sm2ps_L)
 
         f.close()
     ## end saveSmilei
