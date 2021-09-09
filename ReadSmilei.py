@@ -130,10 +130,19 @@ class ReadSmilei:
         self.Lx         = self.L_cells[0]*self.N_cells[0]
 
         ## Extracting the electron density
-        electrons = self.S.namelist.Species['electron']
-        self.n0_e = electrons.number_density.value
-        self.x_vacuum = electrons.number_density.xvacuum
-    ### end basic_init
+        try:
+            electrons = self.S.namelist.Species['electron']
+            self.n0_e = electrons.number_density.value
+            self.x_vacuum = electrons.number_density.xvacuum
+        except AttributeError:
+            self.n0_e = self.S.namelist.n0_e
+            self.x_vacuum = self.S.namelist.xvacuum
+        else:
+            self.n0_e = 1.
+            self.x_vacuum = 0
+
+        
+        ### end basic_init
 
     
     ### Inint from file
