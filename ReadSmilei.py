@@ -1,8 +1,9 @@
 ### Smilei post processing for PseudoSpectral
 ################################################################################
-import happi
 import numpy as np
 from numpy.fft import fft, ifft
+import happi
+import joiful.C
 #import scipy as sp
 #import constants_SI as SI # SI constants
 import h5py
@@ -24,7 +25,7 @@ def periodic_corr(x, y):
 
 class ReadSmilei:
      
-    def __init__(self, smilei_path, ps_l0_SI=None):
+    def __init__(self, smilei_path, smilei_output='', ps_l0_SI=None):
 
         ##### Initializing attributes to None
         self.SPath                = None
@@ -313,31 +314,33 @@ class ReadSmilei:
     ## end extractBinnedProfile
 
 
-    
-    # ##
-    # def initPSInterp(self,x_ps=None, N_ps=None,L_ps=None, ps_l0_SI=None):
-    #     ## PS mesh onto which we interpolate in space
-    #     if x_ps is not None:
-    #         self.x_ps = x_ps
-    #     elif (N_ps is not None) and (L_ps is not None):
-    #         self.x_ps = np.linspace(0,L_ps,num=N_ps, endpoint=False)
-            
-            
-    #     ## The unit conversion
-    #     if ps_l0_SI is not None:
-    #         Warning(f"Now using ps_l0_SI = {ps_l0_SI}.")
-    #         self.sm2ps_L     = self.sm_l0_SI/ps_l0_SI
-    #         self.sm2ps_T     = self.sm2ps_L
-    #         self.sm2ps_omega = 1./self.sm2ps_T
-    #         self.sm2ps_dens  =
-    #         self.sm2ps_omega**2
-    ## end initPSInterp
+    ## Wrapper function for time interpolation of plasma
+    ## profiles.
+    ##
+    ## There are two options: 'stationary' or 'wake'; the first option
+    ## ('stationary') is a simple interpolation in time, and the
+    ## second option ('wake') does an estimate of the pofile's
+    ## veloctiy and shifts the profile and then interpolates.
+    ##
+    ## The option 'wake' is default due to backward compatibility
+    def timeInterp(self,t=None,t_ps=None, simulation_type='wake',
+                   plasma_threshold=None, t_wake_formed=None, **kwargs):
+
+        if simulation_type=='wake':
+            return self._timeInterp_wake(t=t,t_ps=t_ps, plasma_threshold=plasma_threshold,
+                                         t_wake_formed=t_wake_formed, **kwargs)
+        elif simulation_type=='stationary':
+            return self._timeInterp_stationary(t=t,t_ps=t_ps, 
+                                               **kwargs)
+        else:
+            raise ValueError(f"Selected simulation_type='{simulation_type}' does not exist.")
 
   
-    ## A function which interpolates the Smilei data in time. This
-    ## function estimates a propagation velocity using a periodic
-    ## correlation measurement.
-    def timeInterp(self,t=None,t_ps=None, plasma_threshold=None, t_wake_formed=None, **kwargs):
+    ## A function which interpolates the Smilei data from a wake field
+    ## setup in time. This function estimates a propagation velocity
+    ## using a periodic correlation measurement.
+    def _timeInterp_wake(self,t=None,t_ps=None,
+                         plasma_threshold=None, t_wake_formed=None, **kwargs):
         if self.wp_sq is None:
             self.extractBinnedProfile(**kwargs)
         #
@@ -456,7 +459,46 @@ class ReadSmilei:
                 ## Returing the sorted x_t and wp_sq (with same sort).
                 return x_t_interp[i_sort], wp_sq_interp#[i_sort]
         ## end if time
-    ## end timeInterp
+    ## end _timeInterp_wake
+    
+
+    ## A function which interpolates the Smilei data from a stationary
+    ## setup in time. 
+    def _timeInterp_stationary(self,t=None,t_ps=None,
+                               **kwargs):
+        if self.wp_sq is None:
+            self.extractBinnedProfile(**kwargs)
+        #
+        if (t_ps is None) and (t is None):
+            Warning("No time coordinate supplied, must have either t or t_ps.")
+        elif (t_ps is not None) and (t is not None):
+            Warning("Both t and t_ps supplied, using t.")
+        elif (t_ps is not None) and (t is None):
+            t = t_ps / self.sm2ps_T
+        # else: #do nothing
+
+        if t <= self.times[0]:
+            ## For times before first saved time, return first saved profile
+            return self.x_t[0,:], self.wp_sq[0,:]
+        elif t > self.times[-1]:
+            ## For times after last saved time, return last saved profile
+            return self.x_t[-1,:], self.wp_sq[-1,:]
+        else:
+            ## For intermediary times, we interpolate in time and
+            ## space, by finding the velocity of the wake and
+            ## interpolating the shape of the wake together with the
+            ## translation due to velocity.
+            i  = np.argmax(self.times >= t) - 1 # time index closest to requested time
+            t1 = self.times[i]                 # closest time below t
+            t2 = self.times[i+1]               # closest time above t
+            dt = t2 - t1                       # 
+            a  = (t2 - t) / (t2 - t1)          # intepolation coefficient
+
+            return a*self.x_t[i,:] + (1-a)*self.x_t[i+1,:], \
+                a*self.wp_sq[i,:] + (1-a)*self.wp_sq[i+1,:]   
+        ## end if time
+    ## end _timeInterp_stationary
+    
 
     ## Function to be used by the PS code, for evaluating wp_sq on the
     ## PS grid, at time t_ps. [All in PS units.]
