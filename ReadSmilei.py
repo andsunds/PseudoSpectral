@@ -1,5 +1,6 @@
 ### Smilei post processing for PseudoSpectral
 ################################################################################
+import gc
 import numpy as np
 from numpy.fft import fft, ifft
 import happi
@@ -33,6 +34,11 @@ class ReadSmilei:
         self.tR2fs                = None
         self.lR2um                = None
 
+        self.fs2tR                = None
+        self.um2lR                = None
+        self.tR2fs                = None
+        self.lR2um                = None
+
         self.sm_l0_SI             = None
         self.sm2ps_L              = None
         self.sm2ps_T              = None
@@ -52,9 +58,15 @@ class ReadSmilei:
         self.x_vacuum             = None
         
         ##### Initializing data attributes
+        ## Binned diagnostics
         self.binned               = None
         self.binnedInit           = False
         self.n_binning            = None
+        ## Tracked diagnostics
+        self.tracked              = None
+        self.trackedInit          = False
+        self.species              = None
+        self.polarization         = None
         ## Smilei saved step info
         self.timeSteps            = None
         self.times                = None
@@ -89,15 +101,8 @@ class ReadSmilei:
                 
         
     def __basic_init__(self,ps_l0_SI):
-        ## Smilei to SI units
-        try:
-            self.tR2fs = 1./self.S.namelist.fs
-            self.lR2um = 1./self.S.namelist.um
-        except AttributeError:
-            self.tR2fs = 1.
-            self.lR2um = 1.
 
-        ## The unit conversion
+        ## Smilei to PS units
         try:
             self.sm_l0_SI = self.S.namelist.l0_SI
         except AttributeError:
@@ -108,6 +113,14 @@ class ReadSmilei:
             self.sm2ps_T     = self.sm2ps_L
             self.sm2ps_omega = 1./self.sm2ps_T
             self.sm2ps_dens  = self.sm2ps_omega**2
+
+            
+        t0_SI = self.sm_l0_SI / 299792458.
+        self.fs2tR = 1.0e-15 /(t0_SI/(2*np.pi))
+        self.um2lR = 1.0e-6  /(self.sm_l0_SI/(2*np.pi))
+        self.tR2fs = 1./self.fs2tR
+        self.lR2um = 1./self.um2lR
+
 
         ## Time of pump-pulse peak amplitde when entering.
         try:
@@ -123,7 +136,7 @@ class ReadSmilei:
             self.t_start_movingwindow = 0.0
             self.vx_movingwindow = 0.0
 
-        ## Smilei simulatio cell data
+        ## Smilei simulation cell data
         self.N_cells    = self.S.namelist.Main.number_of_cells
         self.L_cells    = self.S.namelist.Main.cell_length
         self.dimensions = len(self.N_cells)
@@ -142,7 +155,6 @@ class ReadSmilei:
             self.n0_e = 1.
             self.x_vacuum = 0
 
-        
         ### end basic_init
 
     
@@ -178,6 +190,12 @@ class ReadSmilei:
         self.t_start_movingwindow = f['t_start_movingwindow'][()]
         self.vx_movingwindow      = f['vx_movingwindow'][()]
 
+        t0_SI = self.sm_l0_SI / 299792458.
+        self.fs2tR = 1.0e-15 /(t0_SI/(2*np.pi))
+        self.um2lR = 1.0e-6  /(self.sm_l0_SI/(2*np.pi))
+        self.tR2fs = 1./self.fs2tR
+        self.lR2um = 1./self.um2lR
+
         if ps_l0_SI is not None:
             self.sm2ps_L     = self.sm_l0_SI/ps_l0_SI
             self.sm2ps_T     = self.sm2ps_L
@@ -191,7 +209,9 @@ class ReadSmilei:
                 self.sm2ps_dens  = self.sm2ps_omega**2
         
     ### end file_init
-    
+
+    ######################################################################
+    ######################################################################
 
     ### Function for calculating the shift due to the moving window
     def _movingWindowShift(self,n=None,t=None):
@@ -205,6 +225,9 @@ class ReadSmilei:
         else:
             ValueError("A timestep `n` or time `t` must be supplied.")
             
+    ######################################################################
+    ########################## Binned profiles ###########################
+    ######################################################################
     
     ### A function for initializing the profile to be extracted
     def initBinnedProfile(self, n_binning=None,nx_avg=None):
@@ -270,7 +293,7 @@ class ReadSmilei:
             #t = self.times[i]
 
             x_shift = x_avg + self._movingWindowShift(n=n)
-            x = x_shift%self.Lx
+            x = x_shift % self.Lx
             x[np.logical_and(x==0., x_shift//self.Lx>=1)] = self.Lx
             i_sort = np.argsort(x)
             self.x_t[i,:] = x[i_sort]
@@ -313,6 +336,113 @@ class ReadSmilei:
         ## end for time steps
     ## end extractBinnedProfile
 
+    
+    ######################################################################
+    ######################### Tracked particles ##########################
+    ######################################################################
+    
+    ### A function for initializing the profile to be extracted
+    def initProfileBinner(self, species='electron',polarization=None):
+        if self.S.valid:
+            self._initProfileBinner(species,polarization)
+        else:
+            Warning("Cannot extract Smilei data. This object initilaized from file.")
+    ###
+    def _initProfileBinner(self, species,polarization):
+        self.n_binning = -1
+
+        if polarization is None:
+            if self.polarization is None:
+                self.polarization = 0.0 # default to y-polariazation
+        else:
+            self.polarization = polarization
+            if self.polarization is not None:
+                Warning(f'Changing polarization from {self.polarization:0.2f} to {polarization:0.2f}.')
+
+        self.tracked   = self.S.TrackParticles(species=species,sort=False, chunksize=8e8)
+        self.timeSteps = self.tracked.getTimesteps()
+        self.times     = self.tracked.getTimes()
+        self.N_times   = self.timeSteps.size
+        
+        self.trackedInit = True
+    #
+
+    ### Function for extracting on-axis profile of binned data
+    def profileBinner(self, species='electron', Nx=None, xLim=None, yLim=None,zLim=None,
+                      polarization=None, envelope=None):
+        if self.S.valid:
+            self._profileBinner(species, Nx, xLim, yLim,zLim, polarization,envelope)
+        else:
+            Warning("Cannot extract Smilei data. This object initilaized from file.")
+    ###
+    def _profileBinner(self, species, Nx, xLim, yLim,zLim, polarization,envelope):
+        if not self.trackedInit:
+            self._initProfileBinner(species,polarization)
+
+        ## Init spatial parameters
+        self.Nx = Nx
+        if xLim is None: xLim = np.array([0,self.Lx])
+
+        ## Inint arrays
+        self.x_t   = np.zeros( (self.N_times, self.Nx) )
+        self.wp_sq = np.zeros( self.x_t.shape )
+        
+        for i in range(self.N_times):
+            n = self.timeSteps[i]
+            print(f'i = {i} (of {self.N_times})')
+
+            xLim_shift = xLim + self._movingWindowShift(n=n)
+            
+            particles = self.tracked.getData(timestep=n);
+            weights   = particles[n]['w']
+            x_data    = particles[n]['x']
+            px_data   = particles[n]['px']/self.S.namelist.Species[species].mass
+            py_data   = particles[n]['py']/self.S.namelist.Species[species].mass
+            pz_data   = particles[n]['pz']/self.S.namelist.Species[species].mass
+
+            def f_dv_pol(w, px,py,pz):
+                gamma  = np.sqrt(1 + px**2 + py**2 + pz**2)
+                p_pol  = np.cos(self.polarization)*py + np.sin(self.polarization)*pz
+                return w/gamma * ( 1 - (p_pol/gamma)**2 )
+
+            mask = None
+            if (yLim is not None) or (zLim is not None):
+                mask = np.full_like(weights, True, dtype=bool)
+                if yLim is not None:
+                    mask *= (particles[n]['y']>yLim[0]) * (particles[n]['y']<yLim[1])
+                if zLim is not None:
+                    mask *= (particles[n]['z']>zLim[0]) * (particles[n]['z']<zLim[1])
+            # end create mask
+            
+            wp_sq, x_bin = joiful.C.get_dist1D(x_data,f_dv_pol(weights,px_data,py_data,pz_data),
+                                               xLim_shift,Nx,
+                                               mask=mask, shift_coordinates=False)
+            
+            x = x_bin % self.Lx
+            x[np.logical_and(x==0., x_bin//self.Lx>=1)] = self.Lx
+            i_sort = np.argsort(x)
+            self.x_t[i,:] = x[i_sort]
+            
+            if callable(envelope):
+                s  = envelope(x_avg)
+                wp_sq = s*wp_sq + (1-s)*.5*(wp_sq[0]+wp_sq[-1])    
+            # end if callable
+            
+            self.wp_sq[i,:] = wp_sq[i_sort]
+
+
+            ## Handling a memory overload issue, since `happi` stores
+            ## every recalled timestep.
+            del self.tracked._rawData
+            gc.collect()
+            self.tracked._rawData = None
+        ## end for time steps
+    ## end _profileBinner
+
+    
+    ######################################################################
+    ########################### Interpolations ###########################
+    ######################################################################
 
     ## Wrapper function for time interpolation of plasma
     ## profiles.
@@ -508,8 +638,11 @@ class ReadSmilei:
         ## Then interpolate in space onto the PS mesh (with PS normalization)
         return np.interp(x_ps, x_t*self.sm2ps_L, wp_sq*self.sm2ps_omega**2)
 
+
     
-    
+    ######################################################################
+    ############################ Saving data #############################
+    ######################################################################
 
     ## Function for saving data to a hdf5 file.
     def saveSmileiData(self,fname='smilei_data.h5'):
