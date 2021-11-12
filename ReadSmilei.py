@@ -26,7 +26,7 @@ def periodic_corr(x, y):
 
 class ReadSmilei:
      
-    def __init__(self, smilei_path, smilei_output='', ps_l0_SI=None):
+    def __init__(self, smilei_path, smilei_output='', ps_l0_SI=None,movingWindow=True):
 
         ##### Initializing attributes to None
         self.SPath                = None
@@ -47,6 +47,7 @@ class ReadSmilei:
 
         self.t_pumpPeak           = None
 
+        self.movingWindow         = None
         self.t_start_movingwindow = None
         self.vx_movingwindow      = None
 
@@ -92,7 +93,7 @@ class ReadSmilei:
         
         if self.S.valid:
             self.SPath = smilei_path
-            self.__basic_init__(ps_l0_SI)
+            self.__basic_init__(ps_l0_SI,movingWindow)
         else:
             try:
                 self.__file_init__(smilei_path,ps_l0_SI)
@@ -100,7 +101,7 @@ class ReadSmilei:
                 Warning(f'{smilei_path} does not lead to any valid Smilei simulation or file.')
                 
         
-    def __basic_init__(self,ps_l0_SI):
+    def __basic_init__(self,ps_l0_SI, movingWindow):
 
         ## Smilei to PS units
         try:
@@ -129,13 +130,18 @@ class ReadSmilei:
             self.t_pumpPeak = None
 
         ## Smilei moving window parameters
-        try:
-            self.t_start_movingwindow = self.S.namelist.MovingWindow.time_start
-            self.vx_movingwindow = self.S.namelist.MovingWindow.velocity_x
-        except AttributeError:
+        self.movingWindow = movingWindow
+        if self.movingWindow:
+            try:
+                self.t_start_movingwindow = self.S.namelist.MovingWindow.time_start
+                self.vx_movingwindow = self.S.namelist.MovingWindow.velocity_x
+            except AttributeError:
+                self.t_start_movingwindow = 0.0
+                self.vx_movingwindow = 0.0
+        else:
             self.t_start_movingwindow = 0.0
             self.vx_movingwindow = 0.0
-
+        
         ## Smilei simulation cell data
         self.N_cells    = self.S.namelist.Main.number_of_cells
         self.L_cells    = self.S.namelist.Main.cell_length
@@ -218,7 +224,6 @@ class ReadSmilei:
         t_start = self.t_start_movingwindow
         vx      = self.vx_movingwindow
         if n is not None:
-            
             return vx * max(0, n*self.dt-t_start)
         elif t is not None:
             return vx * max(0, t-t_start)
@@ -382,6 +387,7 @@ class ReadSmilei:
         ## Init spatial parameters
         self.Nx = Nx
         if xLim is None: xLim = np.array([0,self.Lx])
+        dx_bin = (xLim[1]-xLim[0])/self.Nx
 
         ## Inint arrays
         self.x_t   = np.zeros( (self.N_times, self.Nx) )
@@ -417,6 +423,9 @@ class ReadSmilei:
             wp_sq, x_bin = joiful.C.get_dist1D(x_data,f_dv_pol(weights,px_data,py_data,pz_data),
                                                xLim_shift,Nx,
                                                mask=mask, shift_coordinates=False)
+            # wp_sq, x_bin = joiful.C.get_dist1D(x_data,weights,
+            #                                    xLim_shift,Nx,
+            #                                    mask=mask, shift_coordinates=False)
             
             x = x_bin % self.Lx
             x[np.logical_and(x==0., x_bin//self.Lx>=1)] = self.Lx
@@ -428,7 +437,7 @@ class ReadSmilei:
                 wp_sq = s*wp_sq + (1-s)*.5*(wp_sq[0]+wp_sq[-1])    
             # end if callable
             
-            self.wp_sq[i,:] = wp_sq[i_sort]
+            self.wp_sq[i,:] = wp_sq[i_sort] / dx_bin
 
 
             ## Handling a memory overload issue, since `happi` stores
