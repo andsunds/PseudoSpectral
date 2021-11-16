@@ -155,12 +155,14 @@ class ReadSmilei:
             self.n0_e = electrons.number_density.value
             self.x_vacuum = electrons.number_density.xvacuum
         except AttributeError:
-            self.n0_e = self.S.namelist.n0_e
-            self.x_vacuum = self.S.namelist.xvacuum
-        else:
-            self.n0_e = 1.
-            self.x_vacuum = 0
-
+            try:
+                self.n0_e = self.S.namelist.n0_e
+            except:
+                self.n0_e = 1.
+            try:
+                self.x_vacuum = self.S.namelist.Lvac
+            except:
+                self.x_vacuum = 0
         ### end basic_init
 
     
@@ -260,7 +262,10 @@ class ReadSmilei:
             
 
         self.binned    = self.S.ParticleBinning(self.n_binning)
-        self.x_bins    = self.binned.getAxis("moving_x")
+        if self.vx_movingwindow==0.0:
+            self.x_bins    = self.binned.getAxis("x")
+        else:
+            self.x_bins    = self.binned.getAxis("moving_x")
         self.y_bins    = self.binned.getAxis("y")
         self.z_bins    = self.binned.getAxis("z")
         
@@ -329,9 +334,10 @@ class ReadSmilei:
             ## end transverse averages
             
             wp_sq  = rolling_average(wp_sq, self.nx_avg)
-            
-            if self._movingWindowShift(n=n) < self.x_vacuum:
-                wp_sq[x_avg>0.95*self.Lx]  = self.n0_e
+
+            if self.vx_movingwindow != 0.0:
+                if (self._movingWindowShift(n=n) < self.x_vacuum):
+                    wp_sq[x_avg>0.95*self.Lx]  = self.n0_e
                
             if callable(envelope):
                 s  = envelope(x_avg)
