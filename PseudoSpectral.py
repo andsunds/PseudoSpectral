@@ -20,7 +20,7 @@ class PseudoSpectral:
 
     def __init__(self, fname=None,
                  xx=None, L=None, N=None, v_wake=0,
-                 pulse=None, wp_sq=None, E_init=None,
+                 pulse=None, pulse_e=None, wp_sq=None,
                  wp_sq_init=None, filter_1=None, filter_2=None,
                  pulse_center=None,
                  killReflections=None):
@@ -31,14 +31,14 @@ class PseudoSpectral:
         if fname is not None: 
             self.__file_init__(fname)
         else:            
-            self.__basic_init__(xx=xx, L=L, N=N, pulse=pulse,
-                                v_wake=v_wake, wp_sq=wp_sq, E_init=E_init,
+            self.__basic_init__(xx=xx, L=L, N=N, pulse=pulse, pulse_e=pulse_e,
+                                v_wake=v_wake, wp_sq=wp_sq, 
                                 wp_sq_init=wp_sq_init, filter_1=filter_1, filter_2=filter_2,
                                 pulse_center=pulse_center)
     ## end __init__
             
-    def __basic_init__(self, xx=None, L=None, N=None, pulse=None,
-                       v_wake=0, wp_sq=None, E_init=None,
+    def __basic_init__(self, xx=None, L=None, N=None, pulse=None,pulse_e=None,
+                       v_wake=0, wp_sq=None,
                        wp_sq_init=None, filter_1=None, filter_2=None,
                        pulse_center=None):
 
@@ -123,46 +123,66 @@ class PseudoSpectral:
         else:
             self.fltr_2 = 1
 
-        ## Pulse real waveform (vector potential)
-        self.a = self.__ifCallable(pulse, self.x)
-        ## Fourier decomposition (spatial) of the pulse
-        self.A = fft.fft(self.a)
 
+        ## The pulse center (x)
         self.pulse_center = None
         if pulse_center is not None:
             self.pulse_center = pulse_center
-
         ## The initial first time derivative (electric field) is
         ## calculated using the plasma dispersion.
-        if E_init is not None:
-            self.E  = E_init
+        w_sq = None
+        if wp_sq_init is not None:
+            w_sq = wp_sq_init+self.k_sq
+            ## If initial omega_p is give, we use that.
+            self.w_init = np.sqrt(w_sq+0j)
+            self.pulse_center = 0
         else:
-            w_sq = None
-            if wp_sq_init is not None:
-                w_sq = wp_sq_init+self.k_sq
-                ## If initial omega_p is give, we use that.
-                self.w_init = np.sqrt(w_sq+0j)
-                self.pulse_center = 0
+            tmp_pulse=None
+            if pulse is not None:
+                tmp_pulse = self.__ifCallable(pulse, self.x)
+            elif pulse_e is not None:
+                tmp_pulse = self.__ifCallable(pulse, self.x)
             else:
-                ## Else, we use the omega_p at the peak of the pulse.
-                if self.pulse_center is not None:
-                    i_pulse = np.argmax(-np.absolute(self.x-pulse_center))
-                else:
-                    i_pulse = np.argmax(np.absolute(self.a))
-                    self.pulse_center = self.x[i_pulse]
-                w_sq = self.wp_sq[i_pulse]+self.k_sq
-                self.w_init = np.sqrt(w_sq+0j)
+                ValueError("You must supply a value for `pulse` or `pulse_e`.")
+            ## Else, we use the omega_p at the peak of the pulse.
+            if self.pulse_center is not None:
+                i_pulse = np.argmax(-np.absolute(self.x-pulse_center))
+            else:
+                i_pulse = np.argmax(np.absolute(tmp_pulse))
+                self.pulse_center = self.x[i_pulse]
+            w_sq = self.wp_sq[i_pulse]+self.k_sq
+            self.w_init = np.sqrt(w_sq+0j)
+        ## end if wp_sq_init
         
-            # ## The (temporal) frequencies should have the same sign as
-            # ## each corresponding wavenumber. Otherwise the pulse splits
-            # ## in two counter-propagating pulses.
-            # self.w_init[self.Nf:] *= -1
-            self.w_init.real *= np.sign(self.k)
-            self.w_init.imag *= -np.sign(w_sq)
+        ## The (temporal) frequencies should have the same sign as
+        ## each corresponding wavenumber. Otherwise the pulse splits
+        ## in two counter-propagating pulses.
+        self.w_init.real *= np.sign(self.k)
+        self.w_init.imag *= -np.sign(w_sq)
+        
+
+        if pulse is not None:
+            ## Pulse real waveform (vector potential)
+            self.a = self.__ifCallable(pulse, self.x)
+            ## Fourier decomposition (spatial) of the pulse
+            self.A = fft.fft(self.a)
+
             ## First time derivative (= electric field)
             self.E  = -1j * self.w_init * self.A
             self.E[0] = 0
             self.E[self.Nf]=0
+        
+        elif pulse_e is not None:
+            ## Setting the electric field spectrum from init
+            self.E = fft.fft(self.__ifCallable(pulse_e, self.x))
+            self.A = 1j * self.E / self.w_init
+            self.A[0] = 0
+            self.A[self.Nf]=0
+            self.a = fft.ifft(self.A)
+        else:
+            ValueError("You must supply a value for `pulse` or `pulse_e`.")
+
+            
 
     ### end __basic_init__
 
